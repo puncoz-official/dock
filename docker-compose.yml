@@ -188,12 +188,11 @@ services:
       - public
 
   mail:
-    image: mailhog/mailhog:latest
-    container_name: "mailhog"
+    image: axllent/mailpit:latest
+    container_name: "mailpit"
     ports:
-      - 1025:1025
-    expose:
-      - 8025
+      - ${MAILPIT_PORT:-1025}:1025
+      - ${MAILPIT_DASHBOARD_PORT:-8025}:8025
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik_web"
