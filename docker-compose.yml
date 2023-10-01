@@ -10,6 +10,12 @@ networks:
   mysql:
     name: mysql
     driver: bridge
+  mongo:
+    name: mongo
+    driver: bridge
+  rabbitmq:
+    name: rabbitmq
+    driver: bridge
   redis:
     name: redis
     driver: bridge
@@ -29,6 +35,12 @@ volumes:
     name: mysql57_data
   mysql8_data:
     name: mysql8_data
+  mongo_data:
+    name: mongo_data
+  mongo_config:
+    name: mongo_config
+  rabbitmq_data:
+    name: rabbitmq_data
   redis_data:
     name: redis_data
   minio_data:
@@ -128,6 +140,39 @@ services:
     networks:
       - mysql
       - public
+
+  mongo:
+    image: mongo:latest
+    container_name: mongo
+    ports:
+      - ${MONGO_PORT:-27017}:27017
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    networks:
+      - public
+      - mongo
+
+  rabbitmq:
+    image: rabbitmq:alpine
+    container_name: rabbitmq
+    ports:
+      - "${RABBITMQ_NODE_HOST_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_HTTP_HOST_PORT:-15672}:15672"
+      - "${RABBITMQ_MANAGEMENT_HTTPS_HOST_PORT:-15671}:15671"
+      - "${RABBITMQ_WEB_STOMP_HOST_PORT:-15674}:15674"
+    privileged: true
+    hostname: dock-rabbitmq
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+      - ./rabbitmq/management_agent.disable_metrics_collector.conf:/etc/rabbitmq/conf.d/management_agent.disable_metrics_collector.conf
+    networks:
+      - public
+      - rabbitmq
 
   redis:
     image: redis:latest
