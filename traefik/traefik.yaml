@@ -1,0 +1,96 @@
+################################################################
+#
+# Configuration sample for Traefik v2.
+#
+# For Traefik v1: https://github.com/traefik/traefik/blob/v1.7/traefik.sample.toml
+#
+################################################################
+
+################################################################
+# Global configuration
+################################################################
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+################################################################
+# EntryPoints configuration
+################################################################
+
+entryPoints:
+  web:
+    address: :80
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+
+  websecure:
+    address: :443
+
+################################################################
+# Traefik logs configuration
+################################################################
+
+# Traefik logs
+# Enabled by default and log to stdout
+# Log level (default): ERROR or DEBUG
+# filepath for the traefik log: If not specified, stdout will be used.
+# Intermediate directories are created if necessary.
+# Format is either "json" or "common" Common Log Format (CLF)
+#
+log:
+  level: ERROR
+  filePath: /var/log/traefik/error.log
+  format: common
+
+################################################################
+# Access logs configuration
+################################################################
+
+# Enable access logs
+# By default it will write to stdout and produce logs in the textual
+# Common Log Format (CLF), extended with additional fields.
+#
+accessLog:
+  filePath: /var/log/traefik/access.log
+  format: common
+
+################################################################
+# API and dashboard configuration
+################################################################
+
+# Enable API (insecure) and dashboard
+#
+api:
+  insecure: false
+  dashboard: true
+
+################################################################
+# Ping configuration
+################################################################
+
+# Enable ping
+# Name of the related entry point
+#
+ping:
+  entryPoint: web
+
+################################################################
+# Docker configuration backend
+################################################################
+
+# Enable Docker configuration backend
+# Docker server endpoint. Can be a tcp or a unix socket endpoint.
+# endpoint: tcp://10.10.10.10:2375 or unix:///var/run/docker.sock
+#
+providers:
+  docker:
+    endpoint: unix:///var/run/docker.sock
+    watch: true
+    exposedByDefault: false
+
+  file:
+    filename: /etc/traefik/certs.yaml
+    watch: true

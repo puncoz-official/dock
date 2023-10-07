@@ -1,11 +1,151 @@
 #!/usr/bin/env bash
 
-LARAVEL_SERVICE=laravel
-LARAVEL_USER=laravel
+# Determine if stdout is a terminal...
+if test -t 1; then
+    # Determine if colors are supported...
+    ncolors=$(tput colors)
 
-# Source the ".env" file so Laravel's environment variables are available...
+    if test -n "$ncolors" && test "$ncolors" -ge 8; then
+        BOLD="$(tput bold)"
+        RED="$(tput setaf 1)"
+        GREEN="$(tput setaf 2)"
+        YELLOW="$(tput setaf 3)"
+        NC="$(tput sgr0)"
+    fi
+fi
+
+# Function that prints the available commands...
+function display_help {
+    echo "dock: Docker Helper Script"
+    echo
+    echo "${YELLOW}Usage:${NC}" >&2
+    echo "  ./dock COMMAND [options] [arguments]"
+    echo
+    echo "Unknown commands are passed to the docker-compose binary."
+    echo
+    echo "${YELLOW}Certificate's Commands:${NC}"
+    echo "  ${BOLD}To generate certificates for domains:${NC}"
+    echo "  ${GREEN}./dock certs [-n cert_name] [-d domain_name_1] [-d domain_name_2] ...${NC}"
+    echo "  eg: ./dock certs -n my_app -d \"my-app.localhost\" -d \"*.my-app.localhost\"${NC}"
+    echo
+    echo "  ${BOLD}To apply generated certificates:${NC}"
+    echo "  ${GREEN}./dock certs:apply${NC}"
+    echo
+    echo "${YELLOW}docker-compose Commands:${NC}"
+    echo "  ${GREEN}./dock up${NC}          Start the application (runs in the background)"
+    echo "  ${GREEN}./dock down${NC}        Stop the application"
+    echo "  ${GREEN}./dock [commands]${NC}  Supports all docker-compose commands"
+    echo
+    echo "${YELLOW}ssh Commands:${NC}"
+    echo "  ${GREEN}./dock ssh service-name${NC} Start a shell session within the application container (as root user)"
+    echo "  ${GREEN}./dock ssh user@service-name${NC} Start a shell session within the application container (as user supplied)"
+
+    exit 1
+}
+
+# Proxy the "help" command...
+if [ $# -gt 0 ]; then
+    if [ "$1" == "help" ] || [ "$1" == "-h" ] || [ "$1" == "-help" ] || [ "$1" == "--help" ]; then
+        display_help
+    fi
+else
+    display_help
+fi
+
+# Source the ".env" file so environment variables are available...
 if [ -f ./.env ]; then
     source ./.env
+else
+    echo "${BOLD}${RED}No .env file found.${NC}" >&2
+    exit 1
+fi
+
+# mkcert certificates
+if [ "$1" == "certs" ]; then
+    shift 1
+
+    # Check if mkcert is installed
+    if ! mkcert -help > /dev/null 2>&1; then
+        echo "${BOLD}${RED}'mkcert' is not installed. Refer: https://github.com/FiloSottile/mkcert"
+        exit 1
+    fi
+
+    # Initialize variables
+    name=""
+    domains=()
+
+    # Parse command-line options
+    while getopts ":n:d:" option; do
+      case $option in
+        n) name="$OPTARG" ;;
+        d) domains+=("$OPTARG") ;;
+        *) echo "${BOLD}${GREEN}Usage: ./dock certs [-n cert_name] [-d domain_name_1] [-d domain_name_2]"
+           exit 1;;
+      esac
+    done
+
+    # Validate inputs
+    if [ -z "$name" ]; then
+        echo "${BOLD}${RED}Certificate name is required."
+        echo "${BOLD}${GREEN}Usage: ./dock certs [-n cert_name] [-d domain_name_1] [-d domain_name_2]"
+        exit 1
+    fi
+
+    if [ ${#domains[@]} -eq 0 ]; then
+        echo "${BOLD}${RED}Domains are required."
+        echo "${BOLD}${GREEN}Usage: ./dock certs [-n cert_name] [-d domain_name_1] [-d domain_name_2]"
+        exit 1
+    fi
+
+    # Create the directory if not present
+    certs_dir="./data/certs/${name}"
+    if [ ! -d "$certs_dir" ]; then
+        mkdir -p "$certs_dir"
+    fi
+
+    IFS=' ';
+    mkcert -cert-file "${certs_dir}/cert.pem" -key-file "${certs_dir}/key.pem" "${domains[@]}"
+
+    echo "${BOLD}${GREEN}Run following command to apply the certificates:"
+    echo "${BOLD}${YELLOW}./dock certs:apply"
+
+    exit 0
+fi
+
+if [ "$1" == "certs:apply" ]; then
+    # Define the directory containing certificates
+    certs_dir="./data/certs"
+
+    # Define the output YAML file
+    output_yaml="./data/certs/certs.yaml"
+
+    YAML="tls: { certificates: [%s]}"
+
+    CERT=()
+
+    for domain_dir in "$certs_dir"/*
+    do
+      domain=$(basename "$domain_dir")
+      CERT+=("{\"certFile\": \"/etc/certs/${domain}/cert.pem\", \"keyFile\": \"/etc/certs/${domain}/key.pem\"}")
+    done
+
+    YAML=$(printf "${YAML}" "$(IFS=,; echo "${CERT[*]}")")
+
+    echo "$YAML" > ${output_yaml}
+
+    exit  0
+fi
+
+if [[ -z "${DOCKER_COMPOSE}" ]]; then
+    echo "${BOLD}${RED}DOCKER_COMPOSE not set in .env file.${NC}" >&2
+
+    exit 1
+fi
+
+if ! docker info > /dev/null 2>&1; then
+    echo "${BOLD}${RED}Docker is not running.${NC}" >&2
+
+    exit 1
 fi
 
 if [ $# -eq 0 ]; then
@@ -22,10 +162,10 @@ if [ "$1" == "up" ]; then
       then
         read -p "Do you really want to start all services? [y/n] " -n 1 -r
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            ${DOCKER_COMPOSE} -f docker-compose.yml up -d --remove-orphans --build
+            ${DOCKER_COMPOSE} up -d --remove-orphans --build
         fi
     else
-        ${DOCKER_COMPOSE} -f docker-compose.yml up -d --remove-orphans --build "$@"
+        ${DOCKER_COMPOSE} up -d --remove-orphans --build "$@"
     fi
 
     exit 0
@@ -33,7 +173,7 @@ fi
 
 # docker compose down
 if [ "$1" == "down" ]; then
-    ${DOCKER_COMPOSE} -f docker-compose.yml down
+    ${DOCKER_COMPOSE} down
 
     exit 0
 fi
@@ -58,16 +198,7 @@ if [ "$1" == "ssh" ]; then
         exit 0
     fi
 
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" sh -l
-
-    exit 0
-fi
-
-# To execute/run any command inside laravel docker container in formatted way
-if [ "$1" == "run" ]; then
-    shift 1
-
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" "$@"
+    echo "${BOLD}${RED}Please specify docker service name as 'user@service-name'.${NC}" >&2
 
     exit 0
 fi
@@ -90,70 +221,7 @@ if [ "$1" == "mysql:restore" ]; then
     exit 0
 fi
 
-# Composer command inside laravel docker container
-if [ "$1" == "composer" ]; then
-    shift 1
-
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" composer "$@"
-
-    exit 0
-fi
-
-# PHP artisan command to run inside laravel docker container
-if [ "$1" == "par" ]; then
-    shift 1
-
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" php artisan "$@"
-
-    exit 0
-fi
-
-# PHP artisan command to run inside laravel docker container
-if [ "$1" == "yarn" ]; then
-    shift 1
-
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" yarn "$@"
-
-    exit 0
-fi
-
-# PHP artisan command to generate ziggy routes
-if [ "$1" == "generate-routes" ]; then
-    shift 1
-
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" \
-        php artisan ziggy:generate resources/assets/js/routes.generated.js
-
-    exit 0
-fi
-
-# PHP Lint
-if [ "$1" == "lint-php" ]; then
-    shift 1
-
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" \
-        ./vendor/bin/phpcs --standard=./.devops/conf/.php-cs-rules.xml ./app/
-
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" \
-        ./vendor/bin/phpmd ./app/ ansi ./.devops/conf/.php-md-rules.xml
-
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" \
-        ./vendor/bin/phpstan analyse -c ./.devops/conf/.phpstan.neon --memory-limit=2G
-
-    exit 0
-fi
-
-# JS Lint
-if [ "$1" == "lint-js" ]; then
-    shift 1
-
-    ${DOCKER_COMPOSE} exec -u "$LARAVEL_USER" "$LARAVEL_SERVICE" \
-        ./node_modules/.bin/eslint -c ./.eslintrc ./resources
-
-    exit 0
-fi
-
-# Pass unknown commands to the "docker-compose" binary...
+# Pass unknown commands to the "docker compose" binary...
 ${DOCKER_COMPOSE} "$@"
 
 exit 0
