@@ -1,0 +1,6 @@
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/certs/docker/cert.pem
+        keyFile: /etc/certs/docker/key.pem

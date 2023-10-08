@@ -55,9 +55,10 @@ services:
     security_opt:
       - no-new-privileges:true
     volumes:
-      - ./data/traefik:/var/log/traefik:rw
       - ./data/certs:/etc/certs:ro
-      - ./data/certs/certs.yaml:/etc/traefik/certs.yaml:ro
+      - ./data/traefik/logs:/var/log/traefik:rw
+      - ./traefik/dynamic/dynamic-conf.yaml:/etc/traefik/dynamic-conf.yaml:rw
+      - ./data/certs.yaml:/etc/traefik/certs.yaml:ro
       - ./traefik/traefik.yaml:/etc/traefik/traefik.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:

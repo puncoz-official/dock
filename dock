@@ -117,7 +117,7 @@ if [ "$1" == "certs:apply" ]; then
     certs_dir="./data/certs"
 
     # Define the output YAML file
-    output_yaml="./data/certs/certs.yaml"
+    output_yaml="./data/certs.yaml"
 
     YAML="tls: { certificates: [%s]}"
 
@@ -132,6 +132,9 @@ if [ "$1" == "certs:apply" ]; then
     YAML=$(printf "${YAML}" "$(IFS=,; echo "${CERT[*]}")")
 
     echo "$YAML" > ${output_yaml}
+
+    echo "${BOLD}${GREEN}Certificates applied in traefik container successfully!"
+    echo "${BOLD}${RED}Please rebuild / run traefik containers"
 
     exit  0
 fi

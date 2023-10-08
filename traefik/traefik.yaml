@@ -92,5 +92,5 @@ providers:
     exposedByDefault: false
 
   file:
-    filename: /etc/traefik/certs.yaml
+    directory: /etc/traefik
     watch: true
