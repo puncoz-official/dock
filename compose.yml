@@ -23,6 +23,9 @@ networks:
   minio:
     name: minio
     driver: bridge
+  jenkins:
+    name: jenkins
+    driver: bridge
 
 volumes:
   postgres14_data:
@@ -41,6 +44,8 @@ volumes:
     name: redis_data
   minio_data:
     name: minio_data
+  jenkins_data:
+    name: jenkins_data
 
 services:
   traefik:
@@ -222,3 +227,23 @@ services:
       - "traefik.http.routers.minio.rule=Host(`minio.docker.localhost`)"
       - "traefik.http.services.minio.loadbalancer.server.port=8900"
       - "traefik.http.services.minio.loadbalancer.passhostheader=true"
+
+  jenkins:
+    build:
+      context: ./jenkins
+      dockerfile: Dockerfile
+    container_name: jenkins
+    restart: on-failure
+    networks:
+      - jenkins
+    ports:
+      - ${JENKINS_PORT:-8080}:8080
+      - 50000:50000
+    volumes:
+      - jenkins_data:/data
+    environment:
+      - DOCKER_HOST=tcp://docker:2376
+      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_TLS_VERIFY=1
+    labels:
+      - "traefik.enable=false"
