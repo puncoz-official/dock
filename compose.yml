@@ -1,18 +1,9 @@
 networks:
-  public:
+  traefik:
     name: traefik_web
     driver: bridge
   postgres:
     name: postgres
-    driver: bridge
-  mysql:
-    name: mysql
-    driver: bridge
-  mongo:
-    name: mongo
-    driver: bridge
-  rabbitmq:
-    name: rabbitmq
     driver: bridge
   redis:
     name: redis
@@ -20,35 +11,12 @@ networks:
   mail:
     name: mail
     driver: bridge
-  minio:
-    name: minio
-    driver: bridge
-  jenkins:
-    name: jenkins
-    driver: bridge
-  kafka:
-    name: kafka
-    driver: bridge
 
 volumes:
-  postgres14_data:
-    name: postgres14_data
-  mysql56_data:
-    name: mysql56_data
-  mysql57_data:
-    name: mysql57_data
-  mysql8_data:
-    name: mysql8_data
-  mongo_data:
-    name: mongo_data
-  rabbitmq_data:
-    name: rabbitmq_data
+  postgres_data:
+    name: postgres_data
   redis_data:
     name: redis_data
-  minio_data:
-    name: minio_data
-  jenkins_data:
-    name: jenkins_data
 
 services:
   traefik:
@@ -59,7 +27,7 @@ services:
       - ${HTTP_PORT:-80}:80
       - ${HTTPS_PORT:-443}:443
     networks:
-      - public
+      - traefik
     security_opt:
       - no-new-privileges:true
     volumes:
@@ -71,112 +39,30 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
       - "traefik.enable=true"
-      - "traefik.pilot.token=${PILOT_TOKEN}"
-      - "traefik.http.routers.dashboard.tls=true"
-      - "traefik.http.routers.dashboard.rule=Host(`docker.localhost`)"
+      # - "traefik.pilot.token=${PILOT_TOKEN}"
+      # - "traefik.http.routers.dashboard.tls=true"
+      - "traefik.http.routers.dashboard.rule=Host(`mydocker.localhost`)"
       - "traefik.http.routers.dashboard.service=api@internal"
 
-  postgres14:
-    image: postgres:14
-    container_name: "postgres14"
+  postgres:
+    image: postgres:latest
+    container_name: "postgres"
+    depends_on:
+      - traefik
     volumes:
-      - postgres14_data:/var/lib/postgresql/data:rw
+      - postgres_data:/var/lib/postgresql/data:rw
     ports:
-      - ${POSTGRES_14_PORT:-5432}:5432
+      - ${POSTGRES_PORT:-5432}:5432
     environment:
       - POSTGRES_USER=${POSTGRES_ROOT_USER}
       - POSTGRES_PASSWORD=${POSTGRES_ROOT_PASS}
+      # - POSTGRES_DB=${POSTGRES_DB:-default_db}
+      # - PGDATA=/var/lib/postgresql/data
     labels:
       - "traefik.enable=false"
     networks:
       - postgres
-      - public
-
-  mysql56:
-    image: mysql:5.6
-    platform: linux/x86_64
-    container_name: "mysql56"
-    volumes:
-      - ./mysql/56/mysql.cnf:/etc/mysql/conf.d/mysql.cnf:ro
-      - mysql56_data:/var/lib/mysql:rw
-    command: --default-authentication-plugin=mysql_native_password
-    ports:
-      - ${MYSQL_56_PORT:-3306}:3306
-    environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASS}
-    labels:
-      - "traefik.enable=false"
-    networks:
-      - mysql
-      - public
-
-  mysql57:
-    image: mysql:5.7
-    platform: linux/x86_64
-    container_name: "mysql57"
-    command: --default-authentication-plugin=mysql_native_password
-    volumes:
-      - ./mysql/57/mysql.cnf:/etc/mysql/conf.d/mysql.cnf:ro
-      - mysql57_data:/var/lib/mysql:rw
-    ports:
-      - ${MYSQL_57_PORT:-3306}:3306
-    environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASS}
-    labels:
-      - "traefik.enable=false"
-    networks:
-      - mysql
-      - public
-
-  mysql8:
-    image: mysql:8
-    platform: linux/x86_64
-    container_name: "mysql80"
-    volumes:
-      - ./mysql/80/mysql.cnf:/etc/mysql/conf.d/mysql.cnf:ro
-      - mysql8_data:/var/lib/mysql:rw
-    ports:
-      - ${MYSQL_80_PORT:-3306}:3306
-    environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASS}
-    labels:
-      - "traefik.enable=false"
-    networks:
-      - mysql
-      - public
-
-  mongo:
-    image: mongo:latest
-    container_name: mongo
-    ports:
-      - ${MONGO_PORT:-27017}:27017
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USERNAME}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
-    volumes:
-      - mongo_data:/data/db
-      - ./data/mongo/config:/data/configdb:rw
-    networks:
-      - public
-      - mongo
-
-  rabbitmq:
-    image: rabbitmq:alpine
-    container_name: rabbitmq
-    ports:
-      - "${RABBITMQ_NODE_HOST_PORT:-5672}:5672"
-      - "${RABBITMQ_MANAGEMENT_HTTP_HOST_PORT:-15672}:15672"
-      - "${RABBITMQ_MANAGEMENT_HTTPS_HOST_PORT:-15671}:15671"
-      - "${RABBITMQ_WEB_STOMP_HOST_PORT:-15674}:15674"
-    privileged: true
-    hostname: dock-rabbitmq
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
-      - ./rabbitmq/management_agent.disable_metrics_collector.conf:/etc/rabbitmq/conf.d/management_agent.disable_metrics_collector.conf
-    networks:
-      - public
-      - rabbitmq
+      - traefik
 
   redis:
     image: redis:latest
@@ -189,7 +75,7 @@ services:
       - "traefik.enable=false"
     networks:
       - redis
-      - public
+      - traefik
 
   mail:
     image: axllent/mailpit:latest
@@ -200,83 +86,10 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik_web"
-      - "traefik.http.routers.mail.tls=true"
-      - "traefik.http.routers.mail.rule=Host(`mail.docker.localhost`)"
+      # - "traefik.http.routers.mail.tls=true"
+      - "traefik.http.routers.mail.rule=Host(`mail.mydocker.localhost`)"
       - "traefik.http.services.mail.loadbalancer.server.port=8025"
       - "traefik.http.services.mail.loadbalancer.passhostheader=true"
     networks:
       - mail
-      - public
-
-  minio:
-    image: minio/minio:latest
-    container_name: "minio"
-    command: minio server /data/minio --console-address ":8900"
-    volumes:
-      - minio_data:/data/minio
-      - ./data/minio/config:/root/.minio
-    ports:
-      - ${MINIO_PORT:-9000}:9000
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-    networks:
-      - minio
-      - public
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik_web"
-      - "traefik.http.routers.minio.tls=true"
-      - "traefik.http.routers.minio.rule=Host(`minio.docker.localhost`)"
-      - "traefik.http.services.minio.loadbalancer.server.port=8900"
-      - "traefik.http.services.minio.loadbalancer.passhostheader=true"
-
-  jenkins:
-    build:
-      context: ./jenkins
-      dockerfile: Dockerfile
-    container_name: jenkins
-    restart: on-failure
-    networks:
-      - jenkins
-    ports:
-      - ${JENKINS_PORT:-8080}:8080
-      - 50000:50000
-    volumes:
-      - jenkins_data:/data
-    environment:
-      - DOCKER_HOST=tcp://docker:2376
-      - DOCKER_CERT_PATH=/certs/client
-      - DOCKER_TLS_VERIFY=1
-    labels:
-      - "traefik.enable=false"
-
-  zookeeper:
-    image: confluentinc/cp-zookeeper:latest
-    container_name: "zookeeper"
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - ${ZOOKEEPER_PORT:-2181}:2181
-    networks:
-      - kafka
-      - public
-
-  kafka:
-    image: confluentinc/cp-kafka:latest
-    container_name: "kafka"
-    depends_on:
-      - zookeeper
-    ports:
-      - ${KAFKA_PORT:-29092}:29092
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT, PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    networks:
-      - kafka
-      - public
+      - traefik
