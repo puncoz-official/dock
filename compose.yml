@@ -41,7 +41,7 @@ services:
       - "traefik.enable=true"
       # - "traefik.pilot.token=${PILOT_TOKEN}"
       # - "traefik.http.routers.dashboard.tls=true"
-      - "traefik.http.routers.dashboard.rule=Host(`mydocker.localhost`)"
+      - "traefik.http.routers.dashboard.rule=Host(`${DASHBOARD_DOMAIN}`)"
       - "traefik.http.routers.dashboard.service=api@internal"
 
   postgres:
@@ -87,7 +87,7 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik_web"
       # - "traefik.http.routers.mail.tls=true"
-      - "traefik.http.routers.mail.rule=Host(`mail.mydocker.localhost`)"
+      - "traefik.http.routers.mail.rule=Host(`${MAIL_DOMAIN}`)"
       - "traefik.http.services.mail.loadbalancer.server.port=8025"
       - "traefik.http.services.mail.loadbalancer.passhostheader=true"
     networks:
