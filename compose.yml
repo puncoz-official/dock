@@ -5,6 +5,9 @@ networks:
   postgres:
     name: postgres
     driver: bridge
+  qdrant:
+    name: qdrant
+    driver: bridge
   mysql:
     name: mysql
     driver: bridge
@@ -33,6 +36,10 @@ networks:
 volumes:
   postgres14_data:
     name: postgres14_data
+  pgvector_data:
+    name: pgvector_data
+  qdrant_data:
+    name: qdrant_data
   mysql56_data:
     name: mysql56_data
   mysql57_data:
@@ -90,6 +97,38 @@ services:
       - "traefik.enable=false"
     networks:
       - postgres
+      - public
+
+  pgvector:
+    image: pgvector/pgvector:pg14
+    container_name: "pgvector"
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data:rw
+    ports:
+      - ${PGVECTOR_PORT:-5433}:5432
+    environment:
+      - POSTGRES_USER=${POSTGRES_ROOT_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_ROOT_PASS}
+    labels:
+      - "traefik.enable=false"
+    networks:
+      - postgres
+      - public
+
+  qdrant:
+    image: qdrant/qdrant
+    container_name: "qdrant"
+    volumes:
+      - qdrant_data:/qdrant/storage:rw
+    ports:
+      - ${QDRANT_PORT:-6333}:6333
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
+    labels:
+      - "traefik.enable=false"
+    networks:
+      - qdrant
       - public
 
   mysql56:
@@ -279,4 +318,12 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     networks:
       - kafka
+      - public
+
+  crawl4ai:
+    image: unclecode/crawl4ai:basic
+    container_name: "crawl4ai"
+    ports:
+      - ${CRAWL4AI_PORT:-11235}:11235
+    networks:
       - public
