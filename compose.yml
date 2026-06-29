@@ -1,43 +1,50 @@
+name: dock
+
+################################################################
+# Reusable fragments (YAML anchors / extension fields)
+################################################################
+x-restart-policy: &restart-policy unless-stopped
+
+x-security-opt: &security-opt
+  - no-new-privileges:true
+
+x-disabled-labels: &disabled-labels
+  - "traefik.enable=false"
+
+x-postgres-env: &postgres-env
+  POSTGRES_USER: ${POSTGRES_ROOT_USER}
+  POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASS}
+
+################################################################
+# Networks (logical groups). Other projects attach to these as
+# external networks to reach the services they need, e.g.:
+#   networks:
+#     databases:
+#       external: true
+################################################################
 networks:
-  public:
+  # Ingress: traefik + the services it reverse-proxies.
+  traefik_web:
     name: traefik_web
     driver: bridge
-  postgres:
-    name: postgres
+  # Stateful data stores.
+  databases:
+    name: databases
     driver: bridge
-  qdrant:
-    name: qdrant
+  # Brokers / cache / streaming.
+  messaging:
+    name: messaging
     driver: bridge
-  mysql:
-    name: mysql
-    driver: bridge
-  mongo:
-    name: mongo
-    driver: bridge
-  rabbitmq:
-    name: rabbitmq
-    driver: bridge
-  redis:
-    name: redis
-    driver: bridge
-  mail:
-    name: mail
-    driver: bridge
-  minio:
-    name: minio
-    driver: bridge
-  jenkins:
-    name: jenkins
-    driver: bridge
-  kafka:
-    name: kafka
+  # Object storage, mail, CI and other tools apps talk to directly.
+  services:
+    name: services
     driver: bridge
 
 volumes:
   postgres14_data:
     name: postgres14_data
-  pgvector_data:
-    name: pgvector_data
+  pgvector14_data:
+    name: pgvector14_data
   qdrant_data:
     name: qdrant_data
   mysql56_data:
@@ -56,19 +63,20 @@ volumes:
     name: minio_data
   jenkins_data:
     name: jenkins_data
+  kafka_data:
+    name: kafka_data
 
 services:
   traefik:
     image: traefik:latest
     container_name: "traefik"
-    restart: unless-stopped
+    restart: *restart-policy
     ports:
       - ${HTTP_PORT:-80}:80
       - ${HTTPS_PORT:-443}:443
     networks:
-      - public
-    security_opt:
-      - no-new-privileges:true
+      - traefik_web
+    security_opt: *security-opt
     volumes:
       - ./data/certs:/etc/certs:ro
       - ./data/traefik/logs:/var/log/traefik:rw
@@ -76,9 +84,14 @@ services:
       - ./data/certs.yaml:/etc/traefik/certs.yaml:ro
       - ./traefik/traefik.yaml:/etc/traefik/traefik.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     labels:
       - "traefik.enable=true"
-      - "traefik.pilot.token=${PILOT_TOKEN}"
       - "traefik.http.routers.dashboard.tls=true"
       - "traefik.http.routers.dashboard.rule=Host(`docker.localhost`)"
       - "traefik.http.routers.dashboard.service=api@internal"
@@ -86,73 +99,90 @@ services:
   postgres14:
     image: postgres:14
     container_name: "postgres14"
+    restart: *restart-policy
+    security_opt: *security-opt
     volumes:
       - postgres14_data:/var/lib/postgresql/data:rw
     ports:
       - ${POSTGRES_14_PORT:-5432}:5432
     environment:
-      - POSTGRES_USER=${POSTGRES_ROOT_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_ROOT_PASS}
-    labels:
-      - "traefik.enable=false"
+      <<: *postgres-env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    labels: *disabled-labels
     networks:
-      - postgres
-      - public
+      - databases
 
-  pgvector:
+  pgvector14:
     image: pgvector/pgvector:pg14
-    container_name: "pgvector"
+    container_name: "pgvector14"
+    restart: *restart-policy
+    security_opt: *security-opt
     volumes:
-      - pgvector_data:/var/lib/postgresql/data:rw
+      - pgvector14_data:/var/lib/postgresql/data:rw
     ports:
       - ${PGVECTOR_PORT:-5433}:5432
     environment:
-      - POSTGRES_USER=${POSTGRES_ROOT_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_ROOT_PASS}
-    labels:
-      - "traefik.enable=false"
+      <<: *postgres-env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    labels: *disabled-labels
     networks:
-      - postgres
-      - public
+      - databases
 
   qdrant:
-    image: qdrant/qdrant
+    image: qdrant/qdrant:latest
     container_name: "qdrant"
+    restart: *restart-policy
+    security_opt: *security-opt
     volumes:
       - qdrant_data:/qdrant/storage:rw
     ports:
       - ${QDRANT_PORT:-6333}:6333
     environment:
-      - QDRANT__SERVICE__GRPC_PORT=6334
-      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
-    labels:
-      - "traefik.enable=false"
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    labels: *disabled-labels
     networks:
-      - qdrant
-      - public
+      - databases
 
   mysql56:
     image: mysql:5.6
     platform: linux/x86_64
     container_name: "mysql56"
+    restart: *restart-policy
+    security_opt: *security-opt
     volumes:
       - ./mysql/56/mysql.cnf:/etc/mysql/conf.d/mysql.cnf:ro
       - mysql56_data:/var/lib/mysql:rw
-    command: --default-authentication-plugin=mysql_native_password
     ports:
       - ${MYSQL_56_PORT:-3306}:3306
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASS}
-    labels:
-      - "traefik.enable=false"
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASS}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels: *disabled-labels
     networks:
-      - mysql
-      - public
+      - databases
 
   mysql57:
     image: mysql:5.7
     platform: linux/x86_64
     container_name: "mysql57"
+    restart: *restart-policy
+    security_opt: *security-opt
     command: --default-authentication-plugin=mysql_native_password
     volumes:
       - ./mysql/57/mysql.cnf:/etc/mysql/conf.d/mysql.cnf:ro
@@ -160,79 +190,142 @@ services:
     ports:
       - ${MYSQL_57_PORT:-3306}:3306
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASS}
-    labels:
-      - "traefik.enable=false"
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASS}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels: *disabled-labels
     networks:
-      - mysql
-      - public
+      - databases
 
   mysql8:
     image: mysql:8
-    platform: linux/x86_64
     container_name: "mysql80"
+    restart: *restart-policy
+    security_opt: *security-opt
     volumes:
       - ./mysql/80/mysql.cnf:/etc/mysql/conf.d/mysql.cnf:ro
       - mysql8_data:/var/lib/mysql:rw
     ports:
       - ${MYSQL_80_PORT:-3306}:3306
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASS}
-    labels:
-      - "traefik.enable=false"
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASS}
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels: *disabled-labels
     networks:
-      - mysql
-      - public
+      - databases
 
   mongo:
     image: mongo:latest
     container_name: mongo
+    restart: *restart-policy
+    security_opt: *security-opt
     ports:
       - ${MONGO_PORT:-27017}:27017
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USERNAME}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
     volumes:
       - mongo_data:/data/db
       - ./data/mongo/config:/data/configdb:rw
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
-      - public
-      - mongo
+      - databases
 
   rabbitmq:
     image: rabbitmq:alpine
     container_name: rabbitmq
+    restart: *restart-policy
+    security_opt: *security-opt
     ports:
       - "${RABBITMQ_NODE_HOST_PORT:-5672}:5672"
       - "${RABBITMQ_MANAGEMENT_HTTP_HOST_PORT:-15672}:15672"
       - "${RABBITMQ_MANAGEMENT_HTTPS_HOST_PORT:-15671}:15671"
       - "${RABBITMQ_WEB_STOMP_HOST_PORT:-15674}:15674"
-    privileged: true
     hostname: dock-rabbitmq
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
-      - ./rabbitmq/management_agent.disable_metrics_collector.conf:/etc/rabbitmq/conf.d/management_agent.disable_metrics_collector.conf
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq/management_agent.disable_metrics_collector.conf:/etc/rabbitmq/conf.d/management_agent.disable_metrics_collector.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
-      - public
-      - rabbitmq
+      - messaging
 
   redis:
     image: redis:latest
     container_name: "redis"
+    restart: *restart-policy
+    security_opt: *security-opt
     volumes:
       - redis_data:/data
     ports:
       - ${REDIS_PORT:-6379}:6379
-    labels:
-      - "traefik.enable=false"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    labels: *disabled-labels
     networks:
-      - redis
-      - public
+      - messaging
+
+  # Kafka in KRaft mode (no Zookeeper). Single-node broker + controller.
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: "kafka"
+    restart: *restart-policy
+    security_opt: *security-opt
+    ports:
+      - ${KAFKA_PORT:-29092}:29092
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: PLAINTEXT://kafka:9092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:29092 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - messaging
 
   mail:
     image: axllent/mailpit:latest
     container_name: "mailpit"
+    restart: *restart-policy
+    security_opt: *security-opt
     ports:
       - ${MAILPIT_PORT:-1025}:1025
       - ${MAILPIT_DASHBOARD_PORT:-8025}:8025
@@ -244,12 +337,14 @@ services:
       - "traefik.http.services.mail.loadbalancer.server.port=8025"
       - "traefik.http.services.mail.loadbalancer.passhostheader=true"
     networks:
-      - mail
-      - public
+      - traefik_web   # browser access via mail.docker.localhost
+      - services      # apps send SMTP to mailpit:1025
 
   minio:
     image: minio/minio:latest
     container_name: "minio"
+    restart: *restart-policy
+    security_opt: *security-opt
     command: minio server /data/minio --console-address ":8900"
     volumes:
       - minio_data:/data/minio
@@ -257,11 +352,11 @@ services:
     ports:
       - ${MINIO_PORT:-9000}:9000
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     networks:
-      - minio
-      - public
+      - traefik_web   # console via minio.docker.localhost
+      - services      # apps use the S3 API at minio:9000
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik_web"
@@ -275,55 +370,26 @@ services:
       context: ./jenkins
       dockerfile: Dockerfile
     container_name: jenkins
-    restart: on-failure
+    restart: *restart-policy
     networks:
-      - jenkins
+      - services
     ports:
       - ${JENKINS_PORT:-8080}:8080
       - 50000:50000
     volumes:
       - jenkins_data:/data
     environment:
-      - DOCKER_HOST=tcp://docker:2376
-      - DOCKER_CERT_PATH=/certs/client
-      - DOCKER_TLS_VERIFY=1
-    labels:
-      - "traefik.enable=false"
-
-  zookeeper:
-    image: confluentinc/cp-zookeeper:latest
-    container_name: "zookeeper"
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - ${ZOOKEEPER_PORT:-2181}:2181
-    networks:
-      - kafka
-      - public
-
-  kafka:
-    image: confluentinc/cp-kafka:latest
-    container_name: "kafka"
-    depends_on:
-      - zookeeper
-    ports:
-      - ${KAFKA_PORT:-29092}:29092
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT, PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    networks:
-      - kafka
-      - public
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_CERT_PATH: /certs/client
+      DOCKER_TLS_VERIFY: 1
+    labels: *disabled-labels
 
   crawl4ai:
     image: unclecode/crawl4ai:basic
     container_name: "crawl4ai"
+    restart: *restart-policy
+    security_opt: *security-opt
     ports:
       - ${CRAWL4AI_PORT:-11235}:11235
     networks:
-      - public
+      - services
